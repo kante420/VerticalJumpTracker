@@ -1,0 +1,96 @@
+#include <Wire.h>
+#include <Adafruit_VL53L0X.h>
+#include <LiquidCrystal_I2C.h>
+#include <TM1637Display.h>
+
+#define CLK 3
+#define DIO 2
+#define BUTTON_PIN 4
+
+TM1637Display display7seg(CLK, DIO);
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Ajusta la dirección si es diferente
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+
+const float UMBRAL_SALTO = 20.0; // mm, distancia mínima para detectar salto
+enum Estado { ESPERA, ESPERANDO_SALTO, MIDENDO };
+Estado estado = ESPERA;
+
+bool enVuelo = false;
+unsigned long tiempoInicio = 0;
+float distancia = 0;
+
+void setup() {
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  lcd.init();
+  lcd.backlight();
+  display7seg.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("JUMPING TRACKER");
+  lcd.setCursor(0, 1);
+  lcd.print("Press button...");
+
+  if(!lox.begin()) {
+    lcd.clear();
+    lcd.print("VL53L0X ERROR");
+    while(1);
+  }
+}
+
+void loop() {
+  VL53L0X_RangingMeasurementData_t medida;
+  lox.rangingTest(&medida, false);
+  if(medida.RangeStatus == 0) {
+    distancia = medida.RangeMilliMeter;
+  }
+
+  switch (estado) {
+    case ESPERA:
+      if(digitalRead(BUTTON_PIN) == LOW) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Ready...");
+        delay(500);
+        estado = ESPERANDO_SALTO;
+      }
+      break;
+
+    case ESPERANDO_SALTO:
+      if(distancia > UMBRAL_SALTO) {
+        enVuelo = true;
+        tiempoInicio = millis();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Jumping...");
+        estado = MIDENDO;
+      }
+      break;
+
+    case MIDENDO:
+      if(distancia <= UMBRAL_SALTO && enVuelo) {
+        enVuelo = false;
+        unsigned long tiempoVuelo = millis() - tiempoInicio;
+
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Flight Time:");
+        lcd.setCursor(0, 1);
+        lcd.print(tiempoVuelo);
+        lcd.print(" ms");
+
+        // Mostrar en TM1637 (max 4 dígitos)
+        display7seg.showNumberDec(tiempoVuelo, false);
+
+        delay(3000);
+        display7seg.clear();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("JUMPING TRACKER");
+        lcd.setCursor(0, 1);
+        lcd.print("Press button...");
+        estado = ESPERA;
+      }
+      break;
+  }
+}
